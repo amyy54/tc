@@ -1,0 +1,12 @@
+[package]
+name = "tc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4.24"
+chrono-tz = "0.8.2"
+clap = "4.2.4"
+confy = "0.5.1"
+serde = "1.0.160"
+serde_derive = "1.0.160"
