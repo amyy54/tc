@@ -56,8 +56,7 @@ fn cli() -> Command {
         .subcommand(
             Command::new("t")
                 .about("Get time based on defined timezones.")
-                .arg(arg!(time: [TIME]))
-                .arg(arg!(timezone: [TIMEZONE])),
+                .arg(arg!(time: [TIME])),
         )
 }
 
@@ -89,7 +88,7 @@ fn get_local_date_time(
                 1 => {
                     let newstring = collection[0].to_owned() + ":00";
                     NaiveTime::parse_from_str(&newstring, "%H:%M")?
-                },
+                }
                 _ => NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
             }
         } // Handle if not okay.
@@ -178,7 +177,7 @@ fn main() -> Result<(), ParseError> {
             Some(("list", _)) => {
                 match print_defines_list() {
                     Ok(t) => return Ok(t),
-                    Err(_e) => return Ok(())
+                    Err(_e) => return Ok(()),
                 };
             }
             Some(("remove", sub_matches_remove)) => {
@@ -231,7 +230,7 @@ fn main() -> Result<(), ParseError> {
             None => {
                 match print_defines_list() {
                     Ok(t) => return Ok(t),
-                    Err(_e) => return Ok(())
+                    Err(_e) => return Ok(()),
                 };
             }
         },
@@ -266,10 +265,11 @@ fn main() -> Result<(), ParseError> {
                         let day_diff: u32;
                         if converted_time.day() > offset_local_datetime.day() {
                             day_diff = converted_time.day() - offset_local_datetime.day();
+                            offset_string = format!("(+{}", day_diff);
                         } else {
                             day_diff = offset_local_datetime.day() - converted_time.day();
+                            offset_string = format!("(-{}", day_diff);
                         }
-                        offset_string = format!("(+{}", day_diff);
                         if day_diff == 1 {
                             offset_string += " day)";
                         } else {
