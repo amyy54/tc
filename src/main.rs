@@ -107,6 +107,10 @@ fn get_local_date_time(
         .unwrap())
 }
 
+fn convert_date_to_timestamp(year: i32, ordinal: u32) -> u32 {
+    ordinal + ((year - 1970) * 365) as u32
+}
+
 fn main() -> Result<(), ParseError> {
     let matches = cli().get_matches();
 
@@ -263,11 +267,13 @@ fn main() -> Result<(), ParseError> {
                     let mut offset_string: String;
                     if converted_time.day() != offset_local_datetime.day() {
                         let day_diff: u32;
-                        if converted_time.day() > offset_local_datetime.day() {
-                            day_diff = converted_time.day() - offset_local_datetime.day();
+                        let converted_ts = convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
+                        let local_ts = convert_date_to_timestamp(offset_local_datetime.year(), offset_local_datetime.ordinal0());
+                        if converted_ts > local_ts {
+                            day_diff = converted_ts - local_ts;
                             offset_string = format!("(+{}", day_diff);
                         } else {
-                            day_diff = offset_local_datetime.day() - converted_time.day();
+                            day_diff = local_ts - converted_ts;
                             offset_string = format!("(-{}", day_diff);
                         }
                         if day_diff == 1 {
