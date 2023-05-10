@@ -1,6 +1,6 @@
 use chrono::format::ParseError;
-use chrono::{offset, DateTime, Datelike, NaiveTime, TimeZone, Timelike};
-use chrono_tz::TZ_VARIANTS;
+use chrono::{offset, DateTime, Datelike, Local, NaiveTime, TimeZone, Timelike};
+use chrono_tz::{Tz, TZ_VARIANTS};
 use clap::{arg, Command};
 use confy::ConfyError;
 use serde_derive::{Deserialize, Serialize};
@@ -12,6 +12,18 @@ const APP_NAME: &str = "tc";
 struct SavedDefines {
     version: u8,
     timezones: Vec<String>,
+}
+
+#[derive(PartialEq)]
+enum CurTimeKind {
+    Local,
+    Tz,
+}
+
+struct CurTime {
+    kind: CurTimeKind,
+    local_time: Option<DateTime<Local>>,
+    tz_time: Option<DateTime<Tz>>,
 }
 
 impl ::std::default::Default for SavedDefines {
@@ -56,7 +68,8 @@ fn cli() -> Command {
         .subcommand(
             Command::new("t")
                 .about("Get time based on defined timezones.")
-                .arg(arg!(time: [TIME])),
+                .arg(arg!(time: [TIME]))
+                .arg(arg!(timezone: -t --timezone [TIMEZONE] "Offset by timezone.")),
         )
 }
 
@@ -74,9 +87,10 @@ fn print_defines_list() -> Result<(), ConfyError> {
     Ok(())
 }
 
-fn get_local_date_time(
+fn get_comparison_date_time(
     time_option: Option<&String>,
-) -> Result<DateTime<offset::Local>, ParseError> {
+    tz: Option<Tz>,
+) -> Result<CurTime, ParseError> {
     let now = offset::Local::now();
 
     let time = match time_option {
@@ -95,16 +109,44 @@ fn get_local_date_time(
         None => NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
     };
 
-    Ok(offset::Local
-        .with_ymd_and_hms(
-            now.year(),
-            now.month(),
-            now.day(),
-            time.hour(),
-            time.minute(),
-            time.second(),
-        )
-        .unwrap())
+    let mut res = CurTime {
+        kind: CurTimeKind::Local,
+        local_time: None,
+        tz_time: None,
+    };
+
+    match tz {
+        Some(t) => {
+            res.tz_time = Some(
+                t.with_ymd_and_hms(
+                    now.year(),
+                    now.month(),
+                    now.day(),
+                    time.hour(),
+                    time.minute(),
+                    time.second(),
+                )
+                .unwrap(),
+            );
+            res.kind = CurTimeKind::Tz;
+        }
+        None => {
+            res.local_time = Some(
+                offset::Local
+                    .with_ymd_and_hms(
+                        now.year(),
+                        now.month(),
+                        now.day(),
+                        time.hour(),
+                        time.minute(),
+                        time.second(),
+                    )
+                    .unwrap(),
+            );
+        }
+    }
+
+    Ok(res)
 }
 
 fn convert_date_to_timestamp(year: i32, ordinal: u32) -> u32 {
@@ -116,13 +158,14 @@ fn main() -> Result<(), ParseError> {
 
     match matches.subcommand() {
         Some(("u", sub_matches)) => {
-            let datetime = match get_local_date_time(sub_matches.get_one::<String>("time")) {
-                Ok(t) => t,
-                Err(_e) => {
-                    println!("Something went wrong when parsing the time!");
-                    return Ok(());
-                }
-            };
+            let datetime =
+                match get_comparison_date_time(sub_matches.get_one::<String>("time"), None) {
+                    Ok(t) => t.local_time.unwrap(),
+                    Err(_e) => {
+                        println!("Something went wrong when parsing the time!");
+                        return Ok(());
+                    }
+                };
 
             let discord_ts = match sub_matches.get_one::<bool>("discord") {
                 Some(t) => *t,
@@ -246,8 +289,26 @@ fn main() -> Result<(), ParseError> {
                     return Ok(());
                 }
             };
-            let offset_local_datetime =
-                match get_local_date_time(sub_matches.get_one::<String>("time")) {
+
+            let timezone: Option<Tz> = match sub_matches.get_one::<String>("timezone") {
+                Some(t) => {
+                    let mut res: Option<Tz> = None;
+                    for timezone in TZ_VARIANTS {
+                        let tz_name = String::from_str(timezone.name()).unwrap();
+                        if config.timezones.contains(&tz_name) {
+                            if tz_name.contains(t) {
+                                res = Some(timezone);
+                                break;
+                            }
+                        }
+                    }
+                    res
+                }
+                None => None,
+            };
+
+            let offset_comparison_datetime =
+                match get_comparison_date_time(sub_matches.get_one::<String>("time"), timezone) {
                     Ok(t) => t,
                     Err(_e) => {
                         println!("Something went wrong when parsing the time!");
@@ -255,34 +316,87 @@ fn main() -> Result<(), ParseError> {
                     }
                 };
 
-            println!("Time: {}\n", offset_local_datetime.time());
+            if offset_comparison_datetime.kind == CurTimeKind::Tz {
+                let time = offset_comparison_datetime.tz_time.unwrap();
+                let fmt_string = "Time for ".to_owned() + time.timezone().name();
+                println!("{0: <25} {1}\n", fmt_string, time.time());
+            } else {
+                let time = offset_comparison_datetime.local_time.unwrap();
+                let fmt_string = "Local Time".to_owned();
+                println!("{0: <25} {1}\n", fmt_string, time.time());
+            }
 
             let mut tz_list: Vec<(String, String, String, i64)> = [].to_vec();
 
             for timezone in TZ_VARIANTS {
                 let tz_name = String::from_str(timezone.name()).unwrap();
                 if config.timezones.contains(&tz_name) {
-                    let converted_time = offset_local_datetime.with_timezone(&timezone);
+                    let converted_time: DateTime<Tz>;
+                    if offset_comparison_datetime.kind == CurTimeKind::Tz {
+                        let time = offset_comparison_datetime.tz_time.unwrap();
+                        converted_time = time.with_timezone(&timezone);
+                    } else {
+                        let time = offset_comparison_datetime.local_time.unwrap();
+                        converted_time = time.with_timezone(&timezone);
+                    }
 
                     let mut offset_string: String;
-                    if converted_time.day() != offset_local_datetime.day() {
-                        let day_diff: u32;
-                        let converted_ts = convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
-                        let local_ts = convert_date_to_timestamp(offset_local_datetime.year(), offset_local_datetime.ordinal0());
-                        if converted_ts > local_ts {
-                            day_diff = converted_ts - local_ts;
-                            offset_string = format!("(+{}", day_diff);
+                    if offset_comparison_datetime.kind == CurTimeKind::Tz {
+                        let offset_time = offset_comparison_datetime.tz_time.unwrap();
+
+                        if converted_time.day() != offset_time.day() {
+                            let day_diff: u32;
+                            let converted_ts = convert_date_to_timestamp(
+                                converted_time.year(),
+                                converted_time.ordinal0(),
+                            );
+                            let local_ts = convert_date_to_timestamp(
+                                offset_time.year(),
+                                offset_time.ordinal0(),
+                            );
+                            if converted_ts > local_ts {
+                                day_diff = converted_ts - local_ts;
+                                offset_string = format!("(+{}", day_diff);
+                            } else {
+                                day_diff = local_ts - converted_ts;
+                                offset_string = format!("(-{}", day_diff);
+                            }
+                            if day_diff == 1 {
+                                offset_string += " day)";
+                            } else {
+                                offset_string += " days)";
+                            }
                         } else {
-                            day_diff = local_ts - converted_ts;
-                            offset_string = format!("(-{}", day_diff);
-                        }
-                        if day_diff == 1 {
-                            offset_string += " day)";
-                        } else {
-                            offset_string += " days)";
+                            offset_string = "".to_string();
                         }
                     } else {
-                        offset_string = "".to_string();
+                        let offset_time = offset_comparison_datetime.local_time.unwrap();
+
+                        if converted_time.day() != offset_time.day() {
+                            let day_diff: u32;
+                            let converted_ts = convert_date_to_timestamp(
+                                converted_time.year(),
+                                converted_time.ordinal0(),
+                            );
+                            let local_ts = convert_date_to_timestamp(
+                                offset_time.year(),
+                                offset_time.ordinal0(),
+                            );
+                            if converted_ts > local_ts {
+                                day_diff = converted_ts - local_ts;
+                                offset_string = format!("(+{}", day_diff);
+                            } else {
+                                day_diff = local_ts - converted_ts;
+                                offset_string = format!("(-{}", day_diff);
+                            }
+                            if day_diff == 1 {
+                                offset_string += " day)";
+                            } else {
+                                offset_string += " days)";
+                            }
+                        } else {
+                            offset_string = "".to_string();
+                        }
                     }
                     tz_list.push((
                         tz_name,
@@ -295,7 +409,7 @@ fn main() -> Result<(), ParseError> {
 
             tz_list.sort_by_key(|k| k.3);
             for item in tz_list {
-                println!("{} : {} {}", item.0, item.1, item.2);
+                println!("{0: <25} {1} {2}", item.0, item.1, item.2);
             }
         }
         Some((&_, _)) => {
