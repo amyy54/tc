@@ -77,7 +77,7 @@ fn print_defines_list() -> Result<(), ConfyError> {
     let config: SavedDefines = match confy::load(APP_NAME, None) {
         Ok(t) => t,
         Err(e) => {
-            println!("Error loading config!");
+            eprintln!("Error loading config!");
             return Err(e);
         }
     };
@@ -85,6 +85,17 @@ fn print_defines_list() -> Result<(), ConfyError> {
         println!("{}", timezone);
     }
     Ok(())
+}
+
+fn tz_offset_from_local_time(time: NaiveTime, now: DateTime<Local>, tz: Option<Tz>) -> NaiveTime {
+    match tz {
+        Some(t) => {
+            let datetime = offset::Local.with_ymd_and_hms(now.year(), now.month(), now.day(), time.hour(), time.minute(), time.second()).unwrap().with_timezone(&t);
+
+            NaiveTime::from_hms_opt(datetime.hour(), datetime.minute(), datetime.second()).unwrap()
+        },
+        None => time
+    }
 }
 
 fn get_comparison_date_time(
@@ -103,10 +114,10 @@ fn get_comparison_date_time(
                     let newstring = collection[0].to_owned() + ":00";
                     NaiveTime::parse_from_str(&newstring, "%H:%M")?
                 }
-                _ => NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
+                _ => tz_offset_from_local_time(NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(), now, tz),
             }
         } // Handle if not okay.
-        None => NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
+        None => tz_offset_from_local_time(NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(), now, tz),
     };
 
     let mut res = CurTime {
@@ -162,7 +173,7 @@ fn main() -> Result<(), ParseError> {
                 match get_comparison_date_time(sub_matches.get_one::<String>("time"), None) {
                     Ok(t) => t.local_time.unwrap(),
                     Err(_e) => {
-                        println!("Something went wrong when parsing the time!");
+                        eprintln!("Something went wrong when parsing the time!");
                         return Ok(());
                     }
                 };
@@ -183,7 +194,7 @@ fn main() -> Result<(), ParseError> {
                 let tz_input = match sub_matches_add.get_one::<String>("timezone") {
                     Some(t) => t,
                     None => {
-                        println!("Timezone not specified!");
+                        eprintln!("Timezone not specified!");
                         return Ok(());
                     }
                 };
@@ -192,7 +203,7 @@ fn main() -> Result<(), ParseError> {
                     let mut config: SavedDefines = match confy::load(APP_NAME, None) {
                         Ok(t) => t,
                         Err(_e) => {
-                            println!("Error loading config!");
+                            eprintln!("Error loading config!");
                             return Ok(());
                         }
                     };
@@ -203,14 +214,14 @@ fn main() -> Result<(), ParseError> {
                         {
                             let tz_name = String::from_str(timezone.name()).unwrap();
                             if config.timezones.contains(&tz_name) {
-                                println!("Already exists in list!");
+                                eprintln!("Already exists in list!");
                                 return Ok(());
                             }
                             config.timezones.push(tz_name);
                             match confy::store(APP_NAME, None, &config) {
                                 Ok(_t) => "",
                                 Err(_e) => {
-                                    println!("Error saving config!");
+                                    eprintln!("Error saving config!");
                                     return Ok(());
                                 }
                             };
@@ -218,7 +229,7 @@ fn main() -> Result<(), ParseError> {
                             return Ok(());
                         }
                     }
-                    println!("Timezone not found!");
+                    eprintln!("Timezone not found!");
                 }
             }
             Some(("list", _)) => {
@@ -231,7 +242,7 @@ fn main() -> Result<(), ParseError> {
                 let tz_input = match sub_matches_remove.get_one::<String>("timezone") {
                     Some(t) => t,
                     None => {
-                        println!("Timezone not specified!");
+                        eprintln!("Timezone not specified!");
                         return Ok(());
                     }
                 };
@@ -240,7 +251,7 @@ fn main() -> Result<(), ParseError> {
                     let mut config: SavedDefines = match confy::load(APP_NAME, None) {
                         Ok(t) => t,
                         Err(_e) => {
-                            println!("Error loading config!");
+                            eprintln!("Error loading config!");
                             return Ok(());
                         }
                     };
@@ -253,13 +264,13 @@ fn main() -> Result<(), ParseError> {
                         }
                     }
                     if !found {
-                        println!("Timezone not found saved in config!");
+                        eprintln!("Timezone not found saved in config!");
                         return Ok(());
                     }
                     match confy::store(APP_NAME, None, &config) {
                         Ok(_t) => "",
                         Err(_e) => {
-                            println!("Error saving config!");
+                            eprintln!("Error saving config!");
                             return Ok(());
                         }
                     };
@@ -272,7 +283,7 @@ fn main() -> Result<(), ParseError> {
                 }
             }
             Some((&_, _)) => {
-                println!("Invalid Command!");
+                eprintln!("Invalid Command!");
             }
             None => {
                 match print_defines_list() {
@@ -285,7 +296,7 @@ fn main() -> Result<(), ParseError> {
             let config: SavedDefines = match confy::load(APP_NAME, None) {
                 Ok(t) => t,
                 Err(_e) => {
-                    println!("Error loading config!");
+                    eprintln!("Error loading config!");
                     return Ok(());
                 }
             };
@@ -311,7 +322,7 @@ fn main() -> Result<(), ParseError> {
                 match get_comparison_date_time(sub_matches.get_one::<String>("time"), timezone) {
                     Ok(t) => t,
                     Err(_e) => {
-                        println!("Something went wrong when parsing the time!");
+                        eprintln!("Something went wrong when parsing the time!");
                         return Ok(());
                     }
                 };
@@ -413,10 +424,10 @@ fn main() -> Result<(), ParseError> {
             }
         }
         Some((&_, _)) => {
-            println!("Invalid Command!");
+            eprintln!("Invalid Command!");
         }
         None => {
-            println!("Invalid Command!");
+            eprintln!("Invalid Command!");
         }
     };
 
