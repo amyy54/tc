@@ -8,8 +8,20 @@ use std::str::FromStr;
 
 const APP_NAME: &str = "tc";
 
+#[derive(Serialize, Deserialize, Clone)]
+struct SavedTimezones {
+    timezone_name: String,
+    nickname: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct SavedDefines {
+    version: u8,
+    timezones: Vec<SavedTimezones>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct SavedDefinesV0 {
     version: u8,
     timezones: Vec<String>,
 }
@@ -29,7 +41,7 @@ struct CurTime {
 impl ::std::default::Default for SavedDefines {
     fn default() -> Self {
         Self {
-            version: 0,
+            version: 1,
             timezones: [].to_vec(),
         }
     }
@@ -55,6 +67,12 @@ fn cli() -> Command {
                         .about("Add a new timezone to the list.")
                         .arg(arg!(timezone: [TIMEZONE])),
                 )
+                .subcommand(
+                    Command::new("nick")
+                        .about("Add a nickname to a timezone.")
+                        .arg(arg!(timezone: [TIMEZONE]))
+                        .arg(arg!(nickname: [NICKNAME] "Leave blank to clear nickname.")),
+                )
                 .subcommand(Command::new("list").about("List added timezones."))
                 .subcommand(
                     Command::new("remove")
@@ -73,28 +91,99 @@ fn cli() -> Command {
         )
 }
 
-fn print_defines_list() -> Result<(), ConfyError> {
+fn load_config() -> Result<SavedDefines, ConfyError> {
     let config: SavedDefines = match confy::load(APP_NAME, None) {
         Ok(t) => t,
+        Err(_e) => {
+            // ! Migrating configs is really annoying. There is surely a better way of doing it. For now... enjoy :D
+            let v0: SavedDefinesV0 = match confy::load(APP_NAME, None) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("Error loading config!");
+                    return Err(e);
+                }
+            };
+            eprintln!("Older config found, updating config.");
+            let mut new_tz_list: Vec<SavedTimezones> = [].to_vec();
+            for timezone in v0.timezones {
+                let new = SavedTimezones {
+                    timezone_name: timezone,
+                    nickname: None,
+                };
+                new_tz_list.push(new);
+            }
+            let new_config = SavedDefines {
+                version: 1,
+                timezones: new_tz_list,
+            };
+            match confy::store(APP_NAME, None, &new_config) {
+                Ok(_t) => eprintln!("Update successful, continuing."),
+                Err(e) => {
+                    eprintln!("Error saving config!");
+                    return Err(e);
+                }
+            };
+            new_config
+        }
+    };
+    Ok(config)
+}
+
+fn get_nick_string(nick: Option<String>) -> String {
+    match nick {
+        Some(t) => t,
+        None => "".to_string(),
+    }
+}
+
+fn print_defines_list() -> Result<(), ConfyError> {
+    let config = match load_config() {
+        Ok(t) => t,
         Err(e) => {
-            eprintln!("Error loading config!");
             return Err(e);
         }
     };
     for timezone in config.timezones {
-        println!("{}", timezone);
+        println!(
+            "{0: <25} {1}",
+            timezone.timezone_name,
+            get_nick_string(timezone.nickname)
+        );
     }
     Ok(())
+}
+
+fn saved_list_contains_timezone(defines: &SavedDefines, tz_name: &String) -> (i32, bool) {
+    let mut res = false;
+    let mut index: i32 = -1;
+    for (i, timezone) in defines.timezones.clone().iter().enumerate() {
+        if timezone.timezone_name == tz_name.clone() {
+            res = true;
+            index = i as i32;
+            break;
+        }
+    }
+    (index, res)
 }
 
 fn tz_offset_from_local_time(time: NaiveTime, now: DateTime<Local>, tz: Option<Tz>) -> NaiveTime {
     match tz {
         Some(t) => {
-            let datetime = offset::Local.with_ymd_and_hms(now.year(), now.month(), now.day(), time.hour(), time.minute(), time.second()).unwrap().with_timezone(&t);
+            let datetime = offset::Local
+                .with_ymd_and_hms(
+                    now.year(),
+                    now.month(),
+                    now.day(),
+                    time.hour(),
+                    time.minute(),
+                    time.second(),
+                )
+                .unwrap()
+                .with_timezone(&t);
 
             NaiveTime::from_hms_opt(datetime.hour(), datetime.minute(), datetime.second()).unwrap()
-        },
-        None => time
+        }
+        None => time,
     }
 }
 
@@ -114,10 +203,18 @@ fn get_comparison_date_time(
                     let newstring = collection[0].to_owned() + ":00";
                     NaiveTime::parse_from_str(&newstring, "%H:%M")?
                 }
-                _ => tz_offset_from_local_time(NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(), now, tz),
+                _ => tz_offset_from_local_time(
+                    NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
+                    now,
+                    tz,
+                ),
             }
         } // Handle if not okay.
-        None => tz_offset_from_local_time(NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(), now, tz),
+        None => tz_offset_from_local_time(
+            NaiveTime::from_hms_opt(now.hour(), now.minute(), now.second()).unwrap(),
+            now,
+            tz,
+        ),
     };
 
     let mut res = CurTime {
@@ -200,10 +297,9 @@ fn main() -> Result<(), ParseError> {
                 };
 
                 if tz_input.len() > 0 {
-                    let mut config: SavedDefines = match confy::load(APP_NAME, None) {
+                    let mut config = match load_config() {
                         Ok(t) => t,
                         Err(_e) => {
-                            eprintln!("Error loading config!");
                             return Ok(());
                         }
                     };
@@ -213,11 +309,15 @@ fn main() -> Result<(), ParseError> {
                             .contains(&timezone.name().to_lowercase())
                         {
                             let tz_name = String::from_str(timezone.name()).unwrap();
-                            if config.timezones.contains(&tz_name) {
+                            if saved_list_contains_timezone(&config, &tz_name).1 {
                                 eprintln!("Already exists in list!");
                                 return Ok(());
                             }
-                            config.timezones.push(tz_name);
+                            let new_timezone = SavedTimezones {
+                                timezone_name: tz_name.clone(),
+                                nickname: None,
+                            };
+                            config.timezones.push(new_timezone);
                             match confy::store(APP_NAME, None, &config) {
                                 Ok(_t) => "",
                                 Err(_e) => {
@@ -230,6 +330,45 @@ fn main() -> Result<(), ParseError> {
                         }
                     }
                     eprintln!("Timezone not found!");
+                }
+            }
+            Some(("nick", sub_matches_nick)) => {
+                let tz_input = match sub_matches_nick.get_one::<String>("timezone") {
+                    Some(t) => t,
+                    None => {
+                        eprintln!("Timezone not specified!");
+                        return Ok(());
+                    }
+                };
+                if tz_input.len() > 0 {
+                    let mut config = match load_config() {
+                        Ok(t) => t,
+                        Err(_e) => {
+                            return Ok(());
+                        }
+                    };
+                    let mut found = false;
+                    for (i, timezone) in config.timezones.clone().into_iter().enumerate() {
+                        if tz_input.contains(&timezone.timezone_name) {
+                            let nick: Option<String> =
+                                sub_matches_nick.get_one::<String>("nickname").cloned();
+                            config.timezones[i].nickname = nick;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        eprintln!("Timezone not found saved in config!");
+                        return Ok(());
+                    }
+                    match confy::store(APP_NAME, None, &config) {
+                        Ok(_t) => "",
+                        Err(_e) => {
+                            eprintln!("Error saving config!");
+                            return Ok(());
+                        }
+                    };
+                    println!("Added nickname to {}", tz_input);
                 }
             }
             Some(("list", _)) => {
@@ -248,16 +387,15 @@ fn main() -> Result<(), ParseError> {
                 };
 
                 if tz_input.len() > 0 {
-                    let mut config: SavedDefines = match confy::load(APP_NAME, None) {
+                    let mut config = match load_config() {
                         Ok(t) => t,
                         Err(_e) => {
-                            eprintln!("Error loading config!");
                             return Ok(());
                         }
                     };
                     let mut found = false;
                     for (i, timezone) in config.timezones.clone().into_iter().enumerate() {
-                        if tz_input.contains(&timezone) {
+                        if tz_input.contains(&timezone.timezone_name) {
                             config.timezones.remove(i);
                             found = true;
                             break;
@@ -293,21 +431,32 @@ fn main() -> Result<(), ParseError> {
             }
         },
         Some(("t", sub_matches)) => {
-            let config: SavedDefines = match confy::load(APP_NAME, None) {
+            let config = match load_config() {
                 Ok(t) => t,
                 Err(_e) => {
-                    eprintln!("Error loading config!");
                     return Ok(());
                 }
             };
 
             let timezone: Option<Tz> = match sub_matches.get_one::<String>("timezone") {
                 Some(t) => {
+                    let mut tz_input = t.clone();
                     let mut res: Option<Tz> = None;
+                    for timezone in config.timezones.clone() {
+                        match timezone.nickname {
+                            Some(nick) => {
+                                if nick.to_lowercase().contains(&t.to_lowercase()) {
+                                    tz_input = timezone.timezone_name.clone();
+                                    break;
+                                }
+                            }
+                            None => {continue; }
+                        }
+                    }
                     for timezone in TZ_VARIANTS {
                         let tz_name = String::from_str(timezone.name()).unwrap();
-                        if config.timezones.contains(&tz_name) {
-                            if tz_name.contains(t) {
+                        if saved_list_contains_timezone(&config, &tz_name).1 {
+                            if tz_name.contains(&tz_input) {
                                 res = Some(timezone);
                                 break;
                             }
@@ -341,7 +490,8 @@ fn main() -> Result<(), ParseError> {
 
             for timezone in TZ_VARIANTS {
                 let tz_name = String::from_str(timezone.name()).unwrap();
-                if config.timezones.contains(&tz_name) {
+                let contains = saved_list_contains_timezone(&config, &tz_name);
+                if contains.1 {
                     let converted_time: DateTime<Tz>;
                     if offset_comparison_datetime.kind == CurTimeKind::Tz {
                         let time = offset_comparison_datetime.tz_time.unwrap();
@@ -410,7 +560,10 @@ fn main() -> Result<(), ParseError> {
                         }
                     }
                     tz_list.push((
-                        tz_name,
+                        match &config.timezones[contains.0 as usize].nickname {
+                            Some(t) => format!("[{}] {}", t.to_string(), tz_name),
+                            None => tz_name
+                        },
                         converted_time.time().to_string(),
                         offset_string,
                         converted_time.naive_local().timestamp(),
