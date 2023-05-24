@@ -450,7 +450,9 @@ fn main() -> Result<(), ParseError> {
                                     break;
                                 }
                             }
-                            None => {continue; }
+                            None => {
+                                continue;
+                            }
                         }
                     }
                     for timezone in TZ_VARIANTS {
@@ -562,7 +564,7 @@ fn main() -> Result<(), ParseError> {
                     tz_list.push((
                         match &config.timezones[contains.0 as usize].nickname {
                             Some(t) => format!("[{}] {}", t.to_string(), tz_name),
-                            None => tz_name
+                            None => tz_name,
                         },
                         converted_time.time().to_string(),
                         offset_string,
