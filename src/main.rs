@@ -38,6 +38,17 @@ struct CurTime {
     tz_time: Option<DateTime<Tz>>,
 }
 
+#[derive(Serialize, Clone)]
+struct OutputTime {
+    timezone_name: String,
+    timezone_nickname: Option<String>,
+    displayed_name: String,
+    day_offset: u32,
+    day_offset_str: String,
+    timestamp: i64,
+    timestring: String,
+}
+
 impl ::std::default::Default for SavedDefines {
     fn default() -> Self {
         Self {
@@ -84,7 +95,13 @@ fn cli() -> Command {
             Command::new("t")
                 .about("Default - Get time based on defined timezones.")
                 .arg(arg!(time: [TIME]))
-                .arg(arg!(timezone: -t --timezone [TIMEZONE] "Offset by timezone.")),
+                .arg(arg!(timezone: -t --timezone [TIMEZONE] "Offset by timezone."))
+                .arg(
+                    arg!(output: -o --output [OUTPUT] "Set output format.")
+                        .value_parser(["pretty", "json", "json_pretty", "csv"])
+                        .default_value("pretty")
+                        .default_missing_value("pretty"),
+                ),
         )
 }
 
@@ -266,6 +283,14 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
         }
     };
 
+    let output: String = match sub_matches {
+        Some(val) => match val.get_one::<String>("output") {
+            Some(t) => t.to_string(),
+            None => "pretty".to_owned(),
+        },
+        None => "pretty".to_owned(),
+    };
+
     let timezone: Option<Tz> = match sub_matches {
         Some(val) => match val.get_one::<String>("timezone") {
             Some(t) => {
@@ -316,14 +341,22 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
     if offset_comparison_datetime.kind == CurTimeKind::Tz {
         let time = offset_comparison_datetime.tz_time.unwrap();
         let fmt_string = "Time for ".to_owned() + time.timezone().name();
-        println!("{0: <25} {1}\n", fmt_string, time.time());
+        if output == "pretty" {
+            println!("{0: <25} {1}\n", fmt_string, time.time());
+        } else {
+            eprintln!("{0: <25} {1}\n", fmt_string, time.time());
+        }
     } else {
         let time = offset_comparison_datetime.local_time.unwrap();
         let fmt_string = "Local Time".to_owned();
-        println!("{0: <25} {1}\n", fmt_string, time.time());
+        if output == "pretty" {
+            println!("{0: <25} {1}\n", fmt_string, time.time());
+        } else {
+            eprintln!("{0: <25} {1}\n", fmt_string, time.time());
+        }
     }
 
-    let mut tz_list: Vec<(String, String, String, i64)> = [].to_vec();
+    let mut tz_list: Vec<OutputTime> = [].to_vec();
 
     for timezone in TZ_VARIANTS {
         let tz_name = String::from_str(timezone.name()).unwrap();
@@ -339,11 +372,11 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
             }
 
             let mut offset_string: String;
+            let mut day_diff: u32 = 0;
             if offset_comparison_datetime.kind == CurTimeKind::Tz {
                 let offset_time = offset_comparison_datetime.tz_time.unwrap();
 
                 if converted_time.day() != offset_time.day() {
-                    let day_diff: u32;
                     let converted_ts =
                         convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
                     let local_ts =
@@ -367,7 +400,6 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
                 let offset_time = offset_comparison_datetime.local_time.unwrap();
 
                 if converted_time.day() != offset_time.day() {
-                    let day_diff: u32;
                     let converted_ts =
                         convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
                     let local_ts =
@@ -388,21 +420,49 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
                     offset_string = "".to_string();
                 }
             }
-            tz_list.push((
-                match &config.timezones[contains.0 as usize].nickname {
+            tz_list.push(OutputTime {
+                timezone_name: tz_name.clone(),
+                timezone_nickname: match &config.timezones[contains.0 as usize].nickname {
+                    Some(t) => Some(t.to_string()),
+                    None => None,
+                },
+                displayed_name: match &config.timezones[contains.0 as usize].nickname {
                     Some(t) => format!("[{}] {}", t.to_string(), tz_name),
                     None => tz_name,
                 },
-                converted_time.time().to_string(),
-                offset_string,
-                converted_time.naive_local().timestamp(),
-            ));
+                day_offset: day_diff,
+                day_offset_str: offset_string,
+                timestamp: converted_time.naive_local().timestamp(),
+                timestring: converted_time.time().to_string(),
+            });
         }
     }
 
-    tz_list.sort_by_key(|k| k.3);
-    for item in tz_list {
-        println!("{0: <25} {1} {2}", item.0, item.1, item.2);
+    tz_list.sort_by_key(|k| k.timestamp);
+
+    if output == "pretty" {
+        for item in tz_list {
+            println!(
+                "{0: <25} {1} {2}",
+                item.displayed_name, item.timestring, item.day_offset_str
+            );
+        }
+    } else if output == "csv" {
+        println!("Timezone Name,Timezone Nickname,Day Offset,Timestring,Timestamp");
+        for item in tz_list {
+            let nickname = match item.timezone_nickname {
+                Some(t) => t,
+                None => "null".to_owned(),
+            };
+            println!(
+                "{0},{1},{2},{3},{4}",
+                item.timezone_name, nickname, item.day_offset, item.timestring, item.timestamp
+            );
+        }
+    } else if output == "json" {
+        println!("{}", serde_json::to_string(&tz_list).unwrap());
+    } else if output == "json_pretty" {
+        println!("{}", serde_json::to_string_pretty(&tz_list).unwrap());
     }
 }
 
