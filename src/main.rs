@@ -3,6 +3,7 @@ use chrono::{offset, DateTime, Datelike, Local, NaiveTime, TimeZone, Timelike};
 use chrono_tz::{Tz, TZ_VARIANTS};
 use clap::{arg, ArgMatches, Command};
 use confy::ConfyError;
+use pancurses::{endwin, initscr, Input};
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -101,7 +102,8 @@ fn cli() -> Command {
                         .value_parser(["pretty", "json", "json_pretty", "csv"])
                         .default_value("pretty")
                         .default_missing_value("pretty"),
-                ),
+                )
+                .arg(arg!(curses: -c --curses "Keep active and looping with curses.")),
         )
 }
 
@@ -275,15 +277,17 @@ fn convert_date_to_timestamp(year: i32, ordinal: u32) -> u32 {
     ordinal + ((year - 1970) * 365) as u32
 }
 
-fn t_command(sub_matches: Option<&ArgMatches>) {
+fn t_command(sub_matches: Option<&ArgMatches>) -> Option<String> {
     let config = match load_config() {
         Ok(t) => t,
         Err(_e) => {
-            return;
+            return None;
         }
     };
 
-    let output: String = match sub_matches {
+    let mut output: String = "".to_owned();
+
+    let output_file: String = match sub_matches {
         Some(val) => match val.get_one::<String>("output") {
             Some(t) => t.to_string(),
             None => "pretty".to_owned(),
@@ -334,25 +338,21 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
         Ok(t) => t,
         Err(_e) => {
             eprintln!("Something went wrong when parsing the time!");
-            return;
+            return None;
         }
     };
 
     if offset_comparison_datetime.kind == CurTimeKind::Tz {
         let time = offset_comparison_datetime.tz_time.unwrap();
         let fmt_string = "Time for ".to_owned() + time.timezone().name();
-        if output == "pretty" {
-            println!("{0: <25} {1}\n", fmt_string, time.time());
-        } else {
-            eprintln!("{0: <25} {1}\n", fmt_string, time.time());
+        if output_file == "pretty" {
+            output += &format!("{0: <25} {1}\n\n", fmt_string, time.time());
         }
     } else {
         let time = offset_comparison_datetime.local_time.unwrap();
         let fmt_string = "Local Time".to_owned();
-        if output == "pretty" {
-            println!("{0: <25} {1}\n", fmt_string, time.time());
-        } else {
-            eprintln!("{0: <25} {1}\n", fmt_string, time.time());
+        if output_file == "pretty" {
+            output += &format!("{0: <25} {1}\n\n", fmt_string, time.time());
         }
     }
 
@@ -440,30 +440,31 @@ fn t_command(sub_matches: Option<&ArgMatches>) {
 
     tz_list.sort_by_key(|k| k.timestamp);
 
-    if output == "pretty" {
+    if output_file == "pretty" {
         for item in tz_list {
-            println!(
-                "{0: <25} {1} {2}",
+            output += &format!(
+                "{0: <25} {1} {2}\n",
                 item.displayed_name, item.timestring, item.day_offset_str
             );
         }
-    } else if output == "csv" {
-        println!("Timezone Name,Timezone Nickname,Day Offset,Timestring,Timestamp");
+    } else if output_file == "csv" {
+        output += "Timezone Name,Timezone Nickname,Day Offset,Timestring,Timestamp\n";
         for item in tz_list {
             let nickname = match item.timezone_nickname {
                 Some(t) => t,
                 None => "null".to_owned(),
             };
-            println!(
-                "{0},{1},{2},{3},{4}",
+            output += &format!(
+                "{0},{1},{2},{3},{4}\n",
                 item.timezone_name, nickname, item.day_offset, item.timestring, item.timestamp
             );
         }
-    } else if output == "json" {
-        println!("{}", serde_json::to_string(&tz_list).unwrap());
-    } else if output == "json_pretty" {
-        println!("{}", serde_json::to_string_pretty(&tz_list).unwrap());
+    } else if output_file == "json" {
+        output += &format!("{}", serde_json::to_string(&tz_list).unwrap());
+    } else if output_file == "json_pretty" {
+        output += &format!("{}", serde_json::to_string_pretty(&tz_list).unwrap());
     }
+    return Some(output);
 }
 
 fn main() -> Result<(), ParseError> {
@@ -636,13 +637,41 @@ fn main() -> Result<(), ParseError> {
             }
         },
         Some(("t", sub_matches)) => {
-            t_command(Some(sub_matches));
+            let curses = match sub_matches.get_one::<bool>("curses") {
+                Some(t) => *t,
+                None => false,
+            };
+            if curses {
+                let window = initscr();
+                window.nodelay(true);
+                loop {
+                    window.clear();
+                    match t_command(Some(sub_matches)) {
+                        Some(t) => window.addstr(t),
+                        None => break,
+                    };
+                    match window.getch() {
+                        Some(Input::KeyCancel) => break,
+                        Some(_i) => (),
+                        None => (),
+                    };
+                }
+                endwin();
+            } else {
+                match t_command(Some(sub_matches)) {
+                    Some(t) => println!("{}", t),
+                    None => return Ok(()),
+                };
+            }
         }
         Some((&_, _)) => {
             eprintln!("Invalid Command!");
         }
         None => {
-            t_command(None);
+            match t_command(None) {
+                Some(t) => println!("{}", t),
+                None => return Ok(()),
+            };
         }
     };
 
