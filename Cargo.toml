@@ -2,6 +2,8 @@
 name = "tc"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["Amy C <public@amyy.me"]
 
 [dependencies]
 chrono = "0.4.24"

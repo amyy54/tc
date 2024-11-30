@@ -2,6 +2,12 @@
 
 (T)ime (C)onverter. For those who have to constantly deal with timezones.
 
+## Install
+
+Builds are not provided for `tc` due to issues with cross compilation and the
+curses library I'm using (see jeaye/ncurses-rs#207). macOS universal binaries
+are available with `brew install amyy54/taps/tc`.
+
 ## Usage
 
 ```
