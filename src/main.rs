@@ -8,6 +8,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 
 const APP_NAME: &str = "tc";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize, Deserialize, Clone)]
 struct SavedTimezones {
@@ -61,7 +62,7 @@ struct OutputTime {
     day_offset_str: String,
     timestamp: i64,
     timestring: String,
-    separator: bool
+    separator: bool,
 }
 
 impl ::std::default::Default for SavedDefines {
@@ -77,53 +78,54 @@ fn cli() -> Command {
     Command::new(APP_NAME)
         .about("(T)ime (C)onverter. For those who have to constantly deal with timezones.")
         .subcommand(
-            Command::new("u")
-                .about("Turn provided time into UNIX timestamp.")
-                .arg(arg!(discord: -d --discord "Format for Discord timestamp."))
-                .arg(arg!(time: [TIME])),
-        )
-        .subcommand(
-            Command::new("d")
-                .about("Define timezone to include on list.")
-                .subcommand(
-                    Command::new("add")
-                        .about("Add a new timezone to the list.")
-                        .arg(arg!(timezone: [TIMEZONE])),
-                )
-                .subcommand(
-                    Command::new("nick")
-                        .about("Add a nickname to a timezone.")
-                        .arg(arg!(timezone: [TIMEZONE]))
-                        .arg(arg!(nickname: [NICKNAME] "Leave blank to clear nickname.")),
-                )
-                .subcommand(
-                    Command::new("sep")
-                        .about("Add a separator after the provided timezone when using pretty output.")
-                        .arg(arg!(timezone: [TIMEZONE]))
-                )
-                .subcommand(Command::new("list").about("List added timezones."))
-                .subcommand(
-                    Command::new("remove")
-                        .about("Remove added timezone.")
-                        .arg(arg!(timezone: [TIMEZONE])),
-                )
-                .subcommand(
-                    Command::new("list-available").about("List possible timezones to add."),
-                ),
-        )
-        .subcommand(
             Command::new("t")
-                .about("Default - Get time based on defined timezones.")
+                .about("Default - Get time based on defined timezones")
                 .arg(arg!(time: [TIME]))
-                .arg(arg!(timezone: -t --timezone [TIMEZONE] "Offset by timezone."))
+                .arg(arg!(timezone: -t --timezone [TIMEZONE] "Offset by timezone"))
                 .arg(
-                    arg!(output: -o --output [OUTPUT] "Set output format.")
+                    arg!(output: -o --output [OUTPUT] "Set output format")
                         .value_parser(["pretty", "json", "json_pretty", "csv"])
                         .default_value("pretty")
                         .default_missing_value("pretty"),
                 )
-                .arg(arg!(curses: -c --curses "Keep active and looping with curses.")),
+                .arg(arg!(curses: -c --curses "Keep active and looping with curses")),
         )
+        .subcommand(
+            Command::new("d")
+                .about("Define timezone to include on list")
+                .subcommand(
+                    Command::new("add")
+                        .about("Add a new timezone to the list")
+                        .arg(arg!(timezone: [TIMEZONE])),
+                )
+                .subcommand(
+                    Command::new("nick")
+                        .about("Add a nickname to a timezone")
+                        .arg(arg!(timezone: [TIMEZONE]))
+                        .arg(arg!(nickname: [NICKNAME] "Leave blank to clear nickname")),
+                )
+                .subcommand(
+                    Command::new("sep")
+                        .about(
+                            "Add a separator after the provided timezone when using pretty output",
+                        )
+                        .arg(arg!(timezone: [TIMEZONE])),
+                )
+                .subcommand(Command::new("list").about("List added timezones"))
+                .subcommand(
+                    Command::new("remove")
+                        .about("Remove added timezone")
+                        .arg(arg!(timezone: [TIMEZONE])),
+                )
+                .subcommand(Command::new("list-available").about("List possible timezones to add")),
+        )
+        .subcommand(
+            Command::new("u")
+                .about("Turn provided time into UNIX timestamp")
+                .arg(arg!(discord: -d --discord "Format for Discord timestamp"))
+                .arg(arg!(time: [TIME])),
+        )
+        .arg(arg!(version: --version "Print version"))
 }
 
 fn load_config() -> Result<SavedDefines, ConfyError> {
@@ -472,7 +474,7 @@ fn t_command(sub_matches: Option<&ArgMatches>) -> Option<String> {
                 day_offset_str: offset_string,
                 timestamp: converted_time.naive_local().timestamp(),
                 timestring: converted_time.time().to_string(),
-                separator: config.timezones[contains.0 as usize].separator
+                separator: config.timezones[contains.0 as usize].separator,
             });
         }
     }
@@ -511,6 +513,16 @@ fn t_command(sub_matches: Option<&ArgMatches>) -> Option<String> {
 
 fn main() -> Result<(), ParseError> {
     let matches = cli().get_matches();
+
+    let req_version = match matches.get_one::<bool>("version") {
+        Some(t) => *t,
+        None => false,
+    };
+
+    if req_version {
+        println!("tc: v{}", VERSION);
+        return Ok(());
+    }
 
     match matches.subcommand() {
         Some(("u", sub_matches)) => {
