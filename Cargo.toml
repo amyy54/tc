@@ -8,7 +8,7 @@ authors = ["Amy C <public@amyy.me"]
 [dependencies]
 chrono = "0.4.24"
 chrono-tz = "0.8.2"
-clap = "4.2.4"
+clap = { version = "4.2.4", features = ["cargo"] }
 confy = "0.5.1"
 pancurses = "0.17.0"
 serde = "1.0.160"

@@ -163,7 +163,7 @@ pub fn render_time(
                 },
                 day_offset: day_diff,
                 day_offset_str: offset_string,
-                timestamp: converted_time.naive_local().timestamp(),
+                timestamp: converted_time.naive_local().and_utc().timestamp(),
                 timestring: converted_time.time().to_string(),
                 separator: config.timezones[contains.0 as usize].separator,
             });
