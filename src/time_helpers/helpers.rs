@@ -53,7 +53,7 @@ pub fn tz_offset_from_local_time(
 }
 
 pub fn get_comparison_date_time(
-    time_option: Option<&String>,
+    time_option: Option<String>,
     tz: Option<Tz>,
 ) -> Result<CurTime, ParseError> {
     let now = offset::Local::now();
@@ -62,8 +62,8 @@ pub fn get_comparison_date_time(
         Some(t) => {
             let collection: Vec<&str> = t.split(":").collect();
             match collection.len() {
-                3 => NaiveTime::parse_from_str(t, "%H:%M:%S")?,
-                2 => NaiveTime::parse_from_str(t, "%H:%M")?,
+                3 => NaiveTime::parse_from_str(t.as_str(), "%H:%M:%S")?,
+                2 => NaiveTime::parse_from_str(t.as_str(), "%H:%M")?,
                 1 => {
                     let newstring = collection[0].to_string() + ":00";
                     NaiveTime::parse_from_str(&newstring, "%H:%M")?

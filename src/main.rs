@@ -1,10 +1,8 @@
 use chrono::format::ParseError;
-use chrono::{DateTime, Datelike};
-use chrono_tz::{Tz, TZ_VARIANTS};
+use chrono_tz::TZ_VARIANTS;
 use clap::{arg, ArgMatches, Command};
 use confy::ConfyError;
 use pancurses::{endwin, initscr, Input};
-use std::str::FromStr;
 
 mod config;
 mod time_helpers;
@@ -76,209 +74,32 @@ fn print_defines_list() -> Result<(), ConfyError> {
     for timezone in config.timezones {
         let nick = match timezone.nickname {
             Some(t) => t,
-            None => "".to_string()
+            None => "".to_string(),
         };
-        println!(
-            "{0: <25} {1}",
-            timezone.timezone_name,
-            nick
-        );
+        println!("{0: <25} {1}", timezone.timezone_name, nick);
     }
     Ok(())
 }
 
 fn t_command(sub_matches: Option<&ArgMatches>) -> Option<String> {
-    let config = match config::load_config() {
-        Ok(t) => t,
-        Err(_e) => {
-            return None;
-        }
-    };
-
-    let mut output: String = "".to_string();
-
-    let output_file: String = match sub_matches {
-        Some(val) => match val.get_one::<String>("output") {
-            Some(t) => t.to_string(),
-            None => "pretty".to_string(),
-        },
-        None => "pretty".to_string(),
-    };
-
-    let timezone: Option<Tz> = match sub_matches {
-        Some(val) => match val.get_one::<String>("timezone") {
-            Some(t) => {
-                let mut tz_input = t.clone();
-                let mut res: Option<Tz> = None;
-                for timezone in config.timezones.clone() {
-                    match timezone.nickname {
-                        Some(nick) => {
-                            if nick.to_lowercase().contains(&t.to_lowercase()) {
-                                tz_input = timezone.timezone_name.clone();
-                                break;
-                            }
-                        }
-                        None => {
-                            continue;
-                        }
-                    }
-                }
-                for timezone in TZ_VARIANTS {
-                    let tz_name = String::from_str(timezone.name()).unwrap();
-                    if config::saved_list_contains_timezone(&config, &tz_name).1 {
-                        if tz_name.to_lowercase().contains(&tz_input.to_lowercase()) {
-                            res = Some(timezone);
-                            break;
-                        }
-                    }
-                }
-                res
-            }
+    if sub_matches.is_some() {
+        let matches = sub_matches.unwrap();
+        let timezone_input = match matches.get_one::<String>("timezone") {
+            Some(t) => Some(t.to_string()),
             None => None,
-        },
-        None => None,
-    };
-
-    let time_val = match sub_matches {
-        Some(val) => val.get_one::<String>("time"),
-        None => None,
-    };
-
-    let offset_comparison_datetime = match time_helpers::get_comparison_date_time(time_val, timezone) {
-        Ok(t) => t,
-        Err(_e) => {
-            eprintln!("Something went wrong when parsing the time!");
-            return None;
-        }
-    };
-
-    if offset_comparison_datetime.kind == time_helpers::CurTimeKind::Tz {
-        let time = offset_comparison_datetime.tz_time.unwrap();
-        let fmt_string = "Time for ".to_string() + time.timezone().name();
-        if output_file == "pretty" {
-            output += &format!("{0: <25} {1}\n\n", fmt_string, time.time());
-        }
+        };
+        let time = match matches.get_one::<String>("time") {
+            Some(t) => Some(t.to_string()),
+            None => None,
+        };
+        let output_format = match matches.get_one::<String>("output") {
+            Some(t) => Some(t.to_string()),
+            None => None,
+        };
+        return time_helpers::render_time(timezone_input, time, output_format);
     } else {
-        let time = offset_comparison_datetime.local_time.unwrap();
-        let fmt_string = "Local Time".to_string();
-        if output_file == "pretty" {
-            output += &format!("{0: <25} {1}\n\n", fmt_string, time.time());
-        }
+        return time_helpers::render_time(None, None, None);
     }
-
-    let mut tz_list: Vec<time_helpers::OutputTime> = [].to_vec();
-
-    for timezone in TZ_VARIANTS {
-        let tz_name = String::from_str(timezone.name()).unwrap();
-        let contains = config::saved_list_contains_timezone(&config, &tz_name);
-        if contains.1 {
-            let converted_time: DateTime<Tz>;
-            if offset_comparison_datetime.kind == time_helpers::CurTimeKind::Tz {
-                let time = offset_comparison_datetime.tz_time.unwrap();
-                converted_time = time.with_timezone(&timezone);
-            } else {
-                let time = offset_comparison_datetime.local_time.unwrap();
-                converted_time = time.with_timezone(&timezone);
-            }
-
-            let mut offset_string: String;
-            let mut day_diff: u32 = 0;
-            if offset_comparison_datetime.kind == time_helpers::CurTimeKind::Tz {
-                let offset_time = offset_comparison_datetime.tz_time.unwrap();
-
-                if converted_time.day() != offset_time.day() {
-                    let converted_ts =
-                        time_helpers::convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
-                    let local_ts =
-                        time_helpers::convert_date_to_timestamp(offset_time.year(), offset_time.ordinal0());
-                    if converted_ts > local_ts {
-                        day_diff = converted_ts - local_ts;
-                        offset_string = format!("(+{}", day_diff);
-                    } else {
-                        day_diff = local_ts - converted_ts;
-                        offset_string = format!("(-{}", day_diff);
-                    }
-                    if day_diff == 1 {
-                        offset_string += " day)";
-                    } else {
-                        offset_string += " days)";
-                    }
-                } else {
-                    offset_string = "".to_string();
-                }
-            } else {
-                let offset_time = offset_comparison_datetime.local_time.unwrap();
-
-                if converted_time.day() != offset_time.day() {
-                    let converted_ts =
-                        time_helpers::convert_date_to_timestamp(converted_time.year(), converted_time.ordinal0());
-                    let local_ts =
-                        time_helpers::convert_date_to_timestamp(offset_time.year(), offset_time.ordinal0());
-                    if converted_ts > local_ts {
-                        day_diff = converted_ts - local_ts;
-                        offset_string = format!("(+{}", day_diff);
-                    } else {
-                        day_diff = local_ts - converted_ts;
-                        offset_string = format!("(-{}", day_diff);
-                    }
-                    if day_diff == 1 {
-                        offset_string += " day)";
-                    } else {
-                        offset_string += " days)";
-                    }
-                } else {
-                    offset_string = "".to_string();
-                }
-            }
-            tz_list.push(time_helpers::OutputTime {
-                timezone_name: tz_name.clone(),
-                timezone_nickname: match &config.timezones[contains.0 as usize].nickname {
-                    Some(t) => Some(t.to_string()),
-                    None => None,
-                },
-                displayed_name: match &config.timezones[contains.0 as usize].nickname {
-                    Some(t) => format!("[{}] {}", t.to_string(), tz_name),
-                    None => tz_name,
-                },
-                day_offset: day_diff,
-                day_offset_str: offset_string,
-                timestamp: converted_time.naive_local().timestamp(),
-                timestring: converted_time.time().to_string(),
-                separator: config.timezones[contains.0 as usize].separator,
-            });
-        }
-    }
-
-    tz_list.sort_by_key(|k| k.timestamp);
-
-    if output_file == "pretty" {
-        for item in tz_list {
-            output += &format!(
-                "{0: <25} {1} {2}\n",
-                item.displayed_name, item.timestring, item.day_offset_str
-            );
-            if item.separator {
-                output += &format!("----------------------------------\n");
-            }
-        }
-    } else if output_file == "csv" {
-        output += "Timezone Name,Timezone Nickname,Day Offset,Timestring,Timestamp\n";
-        for item in tz_list {
-            let nickname = match item.timezone_nickname {
-                Some(t) => t,
-                None => "null".to_string(),
-            };
-            output += &format!(
-                "{0},{1},{2},{3},{4}\n",
-                item.timezone_name, nickname, item.day_offset, item.timestring, item.timestamp
-            );
-        }
-    } else if output_file == "json" {
-        output += &format!("{}", serde_json::to_string(&tz_list).unwrap());
-    } else if output_file == "json_pretty" {
-        output += &format!("{}", serde_json::to_string_pretty(&tz_list).unwrap());
-    }
-    return Some(output);
 }
 
 fn main() -> Result<(), ParseError> {
@@ -296,14 +117,14 @@ fn main() -> Result<(), ParseError> {
 
     match matches.subcommand() {
         Some(("u", sub_matches)) => {
-            let datetime =
-                match time_helpers::get_comparison_date_time(sub_matches.get_one::<String>("time"), None) {
-                    Ok(t) => t.local_time.unwrap(),
-                    Err(_e) => {
-                        eprintln!("Something went wrong when parsing the time!");
-                        return Ok(());
-                    }
-                };
+            let time = sub_matches.get_one::<String>("time");
+
+            let input: Option<String> = match time {
+                Some(t) => Some(t.to_string()),
+                None => None,
+            };
+
+            let timestamp = time_helpers::get_unix_timestamp(input);
 
             let discord_ts = match sub_matches.get_one::<bool>("discord") {
                 Some(t) => *t,
@@ -311,9 +132,9 @@ fn main() -> Result<(), ParseError> {
             };
 
             if discord_ts {
-                println!("<t:{}:t>", datetime.timestamp());
+                println!("<t:{}:t>", timestamp);
             } else {
-                println!("{}", datetime.timestamp());
+                println!("{}", timestamp);
             }
         }
         Some(("d", sub_matches)) => match sub_matches.subcommand() {
@@ -329,7 +150,7 @@ fn main() -> Result<(), ParseError> {
                 let res = config::add_timezone(tz_input.clone());
                 match res {
                     Some(t) => println!("Added timezone {}", t),
-                    None => return Ok(())
+                    None => return Ok(()),
                 }
             }
             Some(("nick", sub_matches_nick)) => {
@@ -346,13 +167,13 @@ fn main() -> Result<(), ParseError> {
                 let nick: Option<String> = sub_matches_nick.get_one::<String>("nickname").cloned();
                 match nick {
                     Some(t) => nickname = t,
-                    None => nickname = "".to_string()
+                    None => nickname = "".to_string(),
                 }
 
                 let res = config::add_nick_to_timezone(tz_input.clone(), nickname);
                 match res {
                     Some(t) => println!("Added nickname to {}", t),
-                    None => return Ok(())
+                    None => return Ok(()),
                 }
             }
             Some(("sep", sub_matches_sep)) => {
@@ -367,7 +188,7 @@ fn main() -> Result<(), ParseError> {
                 let res = config::add_sep_to_timezone(tz_input.clone());
                 match res {
                     Some(t) => println!("Added separator after {}", t),
-                    None => return Ok(())
+                    None => return Ok(()),
                 }
             }
             Some(("list", _)) => {
@@ -388,7 +209,7 @@ fn main() -> Result<(), ParseError> {
                 let res = config::remove_timezone(tz_input.clone());
                 match res {
                     Some(t) => println!("Removed timezone {}", t),
-                    None => return Ok(())
+                    None => return Ok(()),
                 }
             }
             Some(("list-available", _)) => {
