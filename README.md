@@ -20,6 +20,6 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --version  Print version
   -h, --help     Print help
+  -V, --version  Print version
 ```
